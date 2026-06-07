@@ -1,11 +1,19 @@
-import sqlite3
+import os
+
+import psycopg2
+from dotenv import load_dotenv
 
 
-DB_NAME = "bot.db"
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_connection():
-    return sqlite3.connect(DB_NAME)
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL отсутствует в переменных окружения")
+
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
@@ -15,7 +23,7 @@ def init_db():
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
-            telegram_id INTEGER PRIMARY KEY,
+            telegram_id BIGINT PRIMARY KEY,
             name TEXT,
             age INTEGER,
             city TEXT
@@ -26,7 +34,7 @@ def init_db():
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS user_settings (
-            telegram_id INTEGER PRIMARY KEY,
+            telegram_id BIGINT PRIMARY KEY,
             theme TEXT,
             notifications TEXT
         )
@@ -36,27 +44,18 @@ def init_db():
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER,
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT,
             role TEXT,
             message_text TEXT
         )
         """
     )
 
-    cursor.execute("PRAGMA table_info(messages)")
-    columns = [column[1] for column in cursor.fetchall()]
-
-    if "role" not in columns:
-        cursor.execute(
-            """
-            ALTER TABLE messages
-            ADD COLUMN role TEXT DEFAULT 'user'
-            """
-        )
-
     connection.commit()
+    cursor.close()
     connection.close()
+
 
 def save_user_profile(telegram_id, name=None, age=None, city=None):
     connection = get_connection()
@@ -65,17 +64,19 @@ def save_user_profile(telegram_id, name=None, age=None, city=None):
     cursor.execute(
         """
         INSERT INTO users (telegram_id, name, age, city)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(telegram_id) DO UPDATE SET
-            name = excluded.name,
-            age = excluded.age,
-            city = excluded.city
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            age = EXCLUDED.age,
+            city = EXCLUDED.city
         """,
         (telegram_id, name, age, city),
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
+
 
 def load_user_profile(telegram_id):
     connection = get_connection()
@@ -85,13 +86,14 @@ def load_user_profile(telegram_id):
         """
         SELECT name, age, city
         FROM users
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         """,
         (telegram_id,),
     )
 
     row = cursor.fetchone()
 
+    cursor.close()
     connection.close()
 
     if row is None:
@@ -103,6 +105,7 @@ def load_user_profile(telegram_id):
         "city": row[2],
     }
 
+
 def get_user_profile(telegram_id):
     connection = get_connection()
     cursor = connection.cursor()
@@ -111,16 +114,18 @@ def get_user_profile(telegram_id):
         """
         SELECT telegram_id, name, age, city
         FROM users
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         """,
         (telegram_id,),
     )
 
     row = cursor.fetchone()
 
+    cursor.close()
     connection.close()
 
     return row
+
 
 def get_all_users():
     connection = get_connection()
@@ -135,9 +140,11 @@ def get_all_users():
 
     rows = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     return rows
+
 
 def save_user_settings(telegram_id, theme=None, notifications=None):
     connection = get_connection()
@@ -146,16 +153,18 @@ def save_user_settings(telegram_id, theme=None, notifications=None):
     cursor.execute(
         """
         INSERT INTO user_settings (telegram_id, theme, notifications)
-        VALUES (?, ?, ?)
-        ON CONFLICT(telegram_id) DO UPDATE SET
-            theme = excluded.theme,
-            notifications = excluded.notifications
+        VALUES (%s, %s, %s)
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            theme = EXCLUDED.theme,
+            notifications = EXCLUDED.notifications
         """,
         (telegram_id, theme, notifications),
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
+
 
 def load_user_settings(telegram_id):
     connection = get_connection()
@@ -165,13 +174,14 @@ def load_user_settings(telegram_id):
         """
         SELECT theme, notifications
         FROM user_settings
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         """,
         (telegram_id,),
     )
 
     row = cursor.fetchone()
 
+    cursor.close()
     connection.close()
 
     if row is None:
@@ -191,16 +201,18 @@ def get_user_settings(telegram_id):
         """
         SELECT theme, notifications
         FROM user_settings
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         """,
         (telegram_id,),
     )
 
     row = cursor.fetchone()
 
+    cursor.close()
     connection.close()
 
     return row
+
 
 def save_message(telegram_id, message_text, role="user"):
     connection = get_connection()
@@ -213,13 +225,15 @@ def save_message(telegram_id, message_text, role="user"):
             role,
             message_text
         )
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
         """,
         (telegram_id, role, message_text),
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
+
 
 def get_user_messages(telegram_id):
     connection = get_connection()
@@ -229,7 +243,7 @@ def get_user_messages(telegram_id):
         """
         SELECT role, message_text
         FROM messages
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         ORDER BY id DESC
         LIMIT 5
         """,
@@ -238,28 +252,11 @@ def get_user_messages(telegram_id):
 
     rows = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     return rows
 
-def get_messages_count(telegram_id):
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        SELECT COUNT(*)
-        FROM messages
-        WHERE telegram_id = ?
-        """,
-        (telegram_id,),
-    )
-
-    count = cursor.fetchone()[0]
-
-    connection.close()
-
-    return count    
 
 def get_recent_messages_for_ai(telegram_id, limit=10):
     connection = get_connection()
@@ -269,15 +266,16 @@ def get_recent_messages_for_ai(telegram_id, limit=10):
         """
         SELECT role, message_text
         FROM messages
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         ORDER BY id DESC
-        LIMIT ?
+        LIMIT %s
         """,
         (telegram_id, limit),
     )
 
     rows = cursor.fetchall()
 
+    cursor.close()
     connection.close()
 
     rows.reverse()
@@ -290,6 +288,28 @@ def get_recent_messages_for_ai(telegram_id, limit=10):
         for role, message_text in rows
     ]
 
+
+def get_messages_count(telegram_id):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM messages
+        WHERE telegram_id = %s
+        """,
+        (telegram_id,),
+    )
+
+    count = cursor.fetchone()[0]
+
+    cursor.close()
+    connection.close()
+
+    return count
+
+
 def clear_user_messages(telegram_id):
     connection = get_connection()
     cursor = connection.cursor()
@@ -297,10 +317,11 @@ def clear_user_messages(telegram_id):
     cursor.execute(
         """
         DELETE FROM messages
-        WHERE telegram_id = ?
+        WHERE telegram_id = %s
         """,
         (telegram_id,),
     )
 
     connection.commit()
+    cursor.close()
     connection.close()
